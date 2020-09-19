@@ -1,10 +1,8 @@
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
 #include <conio.h>
 #include <joystick.h>
-
 
 #ifdef JOYSTICK_DRIVER
 
@@ -13,6 +11,21 @@
 */
 #  undef DYN_DRV
 #  define DYN_DRV       0
+
+/*
+** Link existing drivers this way:
+**
+** cl65 -DJOYSTICK_DRIVER=c64_hitjoy_joy -o joy-test.prg joy-test.c
+**
+** For testing a new driver, you need to uncomment the declaration below,
+** and link your driver this way:
+**
+** co65 ../../target/c64/drv/joy/c64-hitjoy.joy -o hitjoy.s --code-label _hitjoy
+** cl65 -DJOYSTICK_DRIVER=hitjoy -o joy-test.prg joy-test.c hitjoy.s
+*/
+
+/* extern char JOYSTICK_DRIVER; */
+
 #else
 
 /* Use a dynamically loaded driver, by default. */
@@ -25,56 +38,85 @@
 int main (void)
 {
     unsigned char j;
-    unsigned char count;
-    unsigned char i;
+    unsigned char i, count;
+    unsigned char Res;
+
+    clrscr ();
 
 #if DYN_DRV
-    unsigned char Res = joy_load_driver (joy_stddrv);
+    Res = joy_load_driver (joy_stddrv);
 #elif defined(JOYSTICK_DRIVER)
-    unsigned char Res = joy_install (&JOYSTICK_DRIVER);
+    Res = joy_install (&JOYSTICK_DRIVER);
 #else
-    unsigned char Res = joy_install (&joy_static_stddrv);
+    Res = joy_install (&joy_static_stddrv);
 #endif
 
     if (Res != JOY_ERR_OK) {
         cprintf ("Error in joy_load_driver: %u\r\n", Res);
 #if DYN_DRV
-        cprintf ("os: %u, %s\r\n", _oserror, _stroserror (_oserror));
+        cprintf ("OS: %u, %s\r\n", _oserror, _stroserror (_oserror));
 #endif
-        exit (EXIT_FAILURE);
+        return EXIT_FAILURE;
     }
 
-    clrscr ();
     count = joy_count ();
-#ifdef __ATARI5200__
-    cprintf ("JOYSTICKS: %d", count);
+#if defined(__ATARI5200__) || defined(__CREATIVISION__)
+    cprintf ("JOYSTICKS: %u.", count);
 #else
-    cprintf ("Driver supports %d joystick(s)", count);
+    cprintf ("Driver supports %u joystick%s", count, count == 1 ? "." : "s.");
 #endif
     while (1) {
         for (i = 0; i < count; ++i) {
-            gotoxy (0, i+1);
             j = joy_read (i);
-#ifdef __ATARI5200__
-            cprintf ("%1d:%-3s%-3s%-3s%-3s%-3s%-3s",
+#if defined(__NES__) || defined(__CX16__)
+            /* two lines for each device */
+            gotoxy (0, i * 2 +1);
+            cprintf ("%2u:%-6s%-6s%-6s%-6s\r\n"
+                     "   %-6s%-6s%-6s%-6s $%02X",
                      i,
-                     (j & joy_masks[JOY_UP])?    " U " : " u ",
-                     (j & joy_masks[JOY_DOWN])?  " D " : " d ",
-                     (j & joy_masks[JOY_LEFT])?  " L " : " l ",
-                     (j & joy_masks[JOY_RIGHT])? " R " : " r ",
-                     (j & joy_masks[JOY_FIRE])?  " 1 " : "   ",
-                     (j & joy_masks[JOY_FIRE2])? " 2 " : "   ");
+                     JOY_UP(j)    ? "  up  " : " ---- ",
+                     JOY_DOWN(j)  ? " down " : " ---- ",
+                     JOY_LEFT(j)  ? " left " : " ---- ",
+                     JOY_RIGHT(j) ? " right" : " ---- ",
+                     JOY_BTN_1(j) ? "btn A " : " ---- ",
+                     JOY_BTN_2(j) ? "btn B " : " ---- ",
+                     JOY_BTN_3(j) ? "select" : " ---- ",
+                     JOY_BTN_4(j) ? " start" : " ---- ",
+                     j);
 #else
-            cprintf ("%2d: %-6s%-6s%-6s%-6s%-6s%-6s",
+            /* one line for each device */
+            gotoxy (0, i + 1);
+#  if defined(__ATARI5200__) || defined(__CREATIVISION__)
+            cprintf ("%1u:%-3s%-3s%-3s%-3s%-3s %02X",
                      i,
-                     (j & joy_masks[JOY_UP])?    "  up  " : " ---- ",
-                     (j & joy_masks[JOY_DOWN])?  " down " : " ---- ",
-                     (j & joy_masks[JOY_LEFT])?  " left " : " ---- ",
-                     (j & joy_masks[JOY_RIGHT])? "right " : " ---- ",
-                     (j & joy_masks[JOY_FIRE])?  " fire " : " ---- ",
-                     (j & joy_masks[JOY_FIRE2])? "fire2 " : " ---- ");
+                     JOY_UP(j)    ? " U " : " - ",
+                     JOY_DOWN(j)  ? " D " : " - ",
+                     JOY_LEFT(j)  ? " L " : " - ",
+                     JOY_RIGHT(j) ? " R " : " - ",
+                     JOY_BTN_1(j) ? " 1 " : " - ",
+                     j);
+#  else
+            cprintf ("%2u: %-6s%-6s%-6s%-6s%-6s $%02X",
+                     i,
+                     JOY_UP(j)    ? "  up  " : " ---- ",
+                     JOY_DOWN(j)  ? " down " : " ---- ",
+                     JOY_LEFT(j)  ? " left " : " ---- ",
+                     JOY_RIGHT(j) ? "right " : " ---- ",
+                     JOY_BTN_1(j) ? "button" : " ---- ",
+                     j);
+#  endif
 #endif
         }
+
+        /* Show any pressed keys; so that we can verify that the keyboard is working. */
+        if (kbhit ()) {
+#if defined(__NES__) || defined(__CX16__)
+            gotoxy (1, i * 2 + 2);
+#else
+            gotoxy (1, i + 2);
+#endif
+            cprintf ("keyboard: $%02X", cgetc ());
+        }
     }
-    return 0;
+    return EXIT_SUCCESS;
 }

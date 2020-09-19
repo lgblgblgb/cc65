@@ -61,6 +61,7 @@
 /* Flags used */
 #define CEF_USERMARK    0x0001U         /* Generic mark by user functions */
 #define CEF_NUMARG      0x0002U         /* Insn has numerical argument */
+#define CEF_DONT_REMOVE 0x0004U         /* Insn shouldn't be removed, marked by user functions */
 
 /* Code entry structure */
 typedef struct CodeEntry CodeEntry;
@@ -72,8 +73,8 @@ struct CodeEntry {
     char*               Arg;            /* Argument as string */
     unsigned long       Num;            /* Numeric argument */
     unsigned short      Info;           /* Additional code info */
-    unsigned short      Use;            /* Registers used */
-    unsigned short      Chg;            /* Registers changed/destroyed */
+    unsigned int        Use;            /* Registers used */
+    unsigned int        Chg;            /* Registers changed/destroyed */
     CodeLabel*          JumpTo;         /* Jump label */
     Collection          Labels;         /* Labels for this instruction */
     LineInfo*           LI;             /* Source line info for this insn */

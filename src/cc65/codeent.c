@@ -50,6 +50,7 @@
 #include "codelab.h"
 #include "opcodes.h"
 #include "output.h"
+#include "reginfo.h"
 
 
 
@@ -203,6 +204,145 @@ static void SetUseChgInfo (CodeEntry* E, const OPCDesc* D)
 
             default:
                 /* Keep gcc silent */
+                break;
+        }
+
+        /* Append processor flags as well as special usages */
+        switch (E->OPC) {
+
+            case OP65_ADC:
+            case OP65_SBC:
+                E->Use |= PSTATE_C;
+                E->Chg |= PSTATE_CZVN;
+                break;
+            case OP65_ROL:
+            case OP65_ROR:
+                E->Use |= PSTATE_C;
+                E->Chg |= PSTATE_CZN;
+                break;
+            case OP65_ASL:
+            case OP65_LSR:
+                E->Chg |= PSTATE_CZN;
+                break;
+            case OP65_CMP:
+            case OP65_CPX:
+            case OP65_CPY:
+                E->Chg |= PSTATE_CZN;
+                break;
+            case OP65_BIT:
+                E->Chg |= PSTATE_ZVN;
+                if (E->AM != AM65_IMM) {
+                    E->Chg &= ~(PSTATE_V | PSTATE_N);
+                }
+                break;
+            case OP65_BRK:
+                E->Chg |= PSTATE_B;
+                break;
+            case OP65_CLC:
+            case OP65_SEC:
+                E->Chg |= PSTATE_C;
+                break;
+            case OP65_CLD:
+            case OP65_SED:
+                E->Chg |= PSTATE_D;
+                break;
+            case OP65_CLI:
+            case OP65_SEI:
+                E->Chg |= PSTATE_I;
+                break;
+            case OP65_CLV:
+                E->Chg |= PSTATE_V;
+                break;
+            case OP65_TRB:
+            case OP65_TSB:
+                E->Chg |= PSTATE_Z;
+                break;
+            case OP65_BCC:
+            case OP65_BCS:
+            case OP65_JCC:
+            case OP65_JCS:
+                E->Use |= PSTATE_C;
+                break;
+            case OP65_BEQ:
+            case OP65_BNE:
+            case OP65_JEQ:
+            case OP65_JNE:
+                E->Use |= PSTATE_Z;
+                break;
+            case OP65_BMI:
+            case OP65_BPL:
+            case OP65_JMI:
+            case OP65_JPL:
+                E->Use |= PSTATE_N;
+                break;
+            case OP65_BVC:
+            case OP65_BVS:
+            case OP65_JVC:
+            case OP65_JVS:
+                E->Use |= PSTATE_V;
+                break;
+            case OP65_BRA:
+            case OP65_JMP:
+                break;
+            case OP65_AND:
+            case OP65_EOR:
+            case OP65_ORA:
+            case OP65_DEA:
+            case OP65_DEC:
+            case OP65_DEX:
+            case OP65_DEY:
+            case OP65_INA:
+            case OP65_INC:
+            case OP65_INX:
+            case OP65_INY:
+            case OP65_LDA:
+            case OP65_LDX:
+            case OP65_LDY:
+            case OP65_TAX:
+            case OP65_TAY:
+            case OP65_TXA:
+            case OP65_TYA:
+                E->Chg |= PSTATE_ZN;
+                break;
+            case OP65_TSX:
+                E->Use |= SLV_SP65;
+                E->Chg |= PSTATE_ZN;
+                break;
+            case OP65_TXS:
+                E->Chg |= SLV_SP65;
+                break;
+            case OP65_PLA:
+            case OP65_PLX:
+            case OP65_PLY:
+                E->Use |= SLV_SP65;
+                E->Chg |= SLV_PL65 | PSTATE_ZN;
+                break;
+            case OP65_PLP:
+                E->Use |= SLV_SP65;
+                E->Chg |= SLV_PL65 | PSTATE_ALL;
+                break;
+            case OP65_PHA:
+            case OP65_PHX:
+            case OP65_PHY:
+                E->Use |= SLV_SP65;
+                E->Chg |= SLV_PH65;
+                break;
+            case OP65_PHP:
+                E->Use |= SLV_SP65 | PSTATE_ALL;
+                E->Chg |= SLV_PH65;
+                break;
+            case OP65_RTI:
+                E->Chg |= PSTATE_ALL;
+                break;
+            case OP65_RTS:
+                break;
+            case OP65_STA:
+            case OP65_STX:
+            case OP65_STY:
+            case OP65_STZ:
+            case OP65_JSR:
+            case OP65_NOP:
+            default:
                 break;
         }
     }
@@ -360,6 +500,10 @@ void CE_SetArg (CodeEntry* E, const char* Arg)
 
     /* Assign the new one */
     E->Arg = GetArgCopy (Arg);
+
+    /* Update the Use and Chg in E */
+    const OPCDesc* D = GetOPCDesc (E->OPC);
+    SetUseChgInfo (E, D);
 }
 
 
@@ -472,6 +616,11 @@ int CE_UseLoadFlags (CodeEntry* E)
         }
     }
 
+    /* PHP will use all flags */
+    if (E->OPC == OP65_PHP) {
+        return 1;
+    }
+
     /* Anything else */
     return 0;
 }
@@ -489,6 +638,228 @@ void CE_FreeRegInfo (CodeEntry* E)
 
 
 
+static void DeduceZ (RegContents* C, short Val)
+/* Auto-set Z flag */
+{
+    if (RegValIsUnknown (Val)) {
+        C->PFlags |= UNKNOWN_PFVAL_Z;
+    } else {
+        C->PFlags &= ~UNKNOWN_PFVAL_Z;
+        if (Val == 0) {
+            C->PFlags |= PFVAL_Z;
+        }
+    }
+}
+
+
+
+static void DeduceZN (RegContents* C, short Val)
+/* Auto-set Z/N flags */
+{
+    if (RegValIsUnknown (Val)) {
+        C->PFlags |= UNKNOWN_PFVAL_ZN;
+    } else {
+        C->PFlags &= ~UNKNOWN_PFVAL_ZN;
+        if (Val == 0) {
+            C->PFlags |= PFVAL_Z;
+        } else if (Val & PFVAL_N) {
+            C->PFlags |= PFVAL_N;
+        }
+    }
+}
+
+
+
+static short KnownOpADCDeduceCZVN (RegContents* Out, RegContents* In, short Rhs)
+/* Do the ADC and auto-set C/Z/V/N flags.
+** Both operands and the C flag must be known.
+*/
+{
+    short SVal, UVal;
+    SVal = (signed char)(In->RegA & 0xFF) + (signed char)(Rhs & 0xFF);
+    UVal = (In->RegA & 0xFF) + (Rhs & 0xFF);
+    if (In->PFlags & PFVAL_C) {
+        ++SVal;
+        ++UVal;
+    }
+
+    Out->PFlags &= ~UNKNOWN_PFVAL_CZVN;
+    if (UVal > 0xFF) {
+        Out->PFlags |= PFVAL_C;
+    }
+
+    if (SVal < -128 || SVal > 127) {
+        Out->PFlags |= PFVAL_V;
+    }
+
+    DeduceZN (Out, UVal);
+
+    return UVal;
+}
+
+
+
+static short KnownOpSBCDeduceCZVN (RegContents* Out, RegContents* In, short Rhs)
+/* Do the SBC and auto-set C/Z/V/N flags.
+** Both operands and the C flag must be known.
+*/
+{
+    short SVal, UVal;
+    SVal = (signed char)(In->RegA & 0xFF) - (signed char)(Rhs & 0xFF);
+    UVal = (In->RegA & 0xFF) - (Rhs & 0xFF);
+    if ((In->PFlags & PFVAL_C) == 0) {
+        --SVal;
+        --UVal;
+    }
+
+    Out->PFlags &= ~UNKNOWN_PFVAL_CZVN;
+    if (UVal >= 0) {
+        Out->PFlags |= PFVAL_C;
+    }
+
+    if (SVal < -128 || SVal > 127) {
+        Out->PFlags |= PFVAL_V;
+    }
+
+    DeduceZN (Out, UVal);
+
+    return UVal;
+}
+
+
+
+static short KnownOpCmpDeduceCZN (RegContents* C, short Lhs, short Rhs)
+/* Do the CMP and auto-set C/Z/N flags.
+** Both operands must be known.
+ */
+{
+    short Val = (Lhs & 0xFF) - (Rhs & 0xFF);
+
+    C->PFlags &= ~UNKNOWN_PFVAL_C;
+    if (Val >= 0) {
+        C->PFlags |= PFVAL_C;
+    }
+    DeduceZN (C, Val);
+
+    return Val;
+}
+
+
+
+static short AnyOpASLDeduceCZN (RegContents* C, short Shiftee)
+/* Do the ASL and auto-set C/Z/N flags */
+{
+    if (RegValIsKnown (Shiftee)) {
+        C->PFlags &= ~UNKNOWN_PFVAL_C;
+        if (Shiftee & 0x80U) {
+            C->PFlags |= PFVAL_C;
+        }
+        Shiftee = (Shiftee << 1) & 0xFF;
+    }
+    DeduceZN (C, Shiftee);
+
+    return Shiftee;
+}
+
+
+
+static short AnyOpLSRDeduceCZN (RegContents* C, short Shiftee)
+/* Do the LSR and auto-set C/Z/N flags */
+{
+    if (RegValIsKnown (Shiftee)) {
+        C->PFlags &= ~UNKNOWN_PFVAL_C;
+        if (Shiftee & 0x01U) {
+            C->PFlags |= PFVAL_C;
+        }
+        Shiftee = (Shiftee >> 1) & 0xFF;
+    }
+    DeduceZN (C, Shiftee);
+
+    return Shiftee;
+}
+
+
+
+static short AnyOpROLDeduceCZN (RegContents* C, short PFlags, short Shiftee)
+/* Do the ROL and auto-set C/Z/N flags */
+{
+    if (RegValIsKnown (Shiftee) && PStatesAreKnown (PFlags, PSTATE_C)) {
+        C->PFlags &= ~UNKNOWN_PFVAL_C;
+        if (Shiftee & 0x80U) {
+            C->PFlags |= PFVAL_C;
+        }
+        Shiftee = (Shiftee << 1) & 0xFF;
+        if (PFlags & PFVAL_C) {
+            Shiftee |= 0x01U;
+        }
+    } else {
+        Shiftee = UNKNOWN_REGVAL;
+    }
+    DeduceZN (C, Shiftee);
+
+    return Shiftee;
+}
+
+
+
+static short AnyOpRORDeduceCZN (RegContents* C, short PFlags, short Shiftee)
+/* Do the ROR and auto-set C/Z/N flags */
+{
+    if (RegValIsKnown (Shiftee) && PStatesAreKnown (PFlags, PSTATE_C)) {
+        C->PFlags &= ~UNKNOWN_PFVAL_C;
+        if (Shiftee & 0x01U) {
+            C->PFlags |= PFVAL_C;
+        }
+        Shiftee = (Shiftee >> 1) & 0xFF;
+        if (PFlags & PFVAL_C) {
+            Shiftee |= 0x80U;
+        }
+    } else {
+        Shiftee = UNKNOWN_REGVAL;
+    }
+    DeduceZN (C, Shiftee);
+
+    return Shiftee;
+}
+
+
+
+static void BranchDeduceOnProcessorFlag (RegContents* True, RegContents* False, unsigned short PTrueFlag)
+/* Auto-set the corresponding C/Z/V/N flag output for both True/Flase code flows */
+{
+    PTrueFlag &= 0xFF;
+    unsigned short Mask = ~(PTrueFlag * 0x0101U) & 0xFFFFU;
+    True->PFlags  &= Mask;
+    True->PFlags  |= PTrueFlag;
+    False->PFlags &= Mask;
+}
+
+
+
+static int MightAffectKnownZP (CodeEntry* E, RegContents* In)
+/* TODO: This is supposed to check if any builtin ZP could be affected.
+** It simply returns TRUE in most cases for now.
+*/
+{
+    unsigned Index = 0;
+
+    if (E->AM == AM65_ZP ||
+        E->AM == AM65_ABS ||
+        (E->AM == AM65_ZPX && RegValIsKnown (In->RegX) && (Index = In->RegX & 0xFF)) ||
+        (E->AM == AM65_ZPY && RegValIsKnown (In->RegY) && (Index = In->RegY & 0xFF)) ||
+        (E->AM == AM65_ABSX && RegValIsKnown (In->RegX) && (Index = In->RegX & 0xFF)) ||
+        (E->AM == AM65_ABSY && RegValIsKnown (In->RegY) && (Index = In->RegY & 0xFF))) {
+        return 1;
+    } else if ((E->AM == AM65_ZP_IND) ||
+               (E->AM == AM65_ZPX_IND && RegValIsKnown (In->RegX) && (Index = In->RegX & 0xFF)) ||
+               (E->AM == AM65_ZP_INDY && RegValIsKnown (In->RegY) && (Index = In->RegY & 0xFF))) {
+        return 1;
+    }
+    return 1;
+}
+
+
+
 void CE_GenRegInfo (CodeEntry* E, RegContents* InputRegs)
 /* Generate register info for this instruction. If an old info exists, it is
 ** overwritten.
@@ -497,9 +868,13 @@ void CE_GenRegInfo (CodeEntry* E, RegContents* InputRegs)
     /* Pointers to the register contents */
     RegContents* In;
     RegContents* Out;
+    RegContents* BranchOut;
 
     /* Function register usage */
-    unsigned short Use, Chg;
+    unsigned Use, Chg;
+
+    /* Value in question */
+    short Val = UNKNOWN_REGVAL;
 
     /* If we don't have a register info struct, allocate one. */
     if (E->RI == 0) {
@@ -516,18 +891,46 @@ void CE_GenRegInfo (CodeEntry* E, RegContents* InputRegs)
     /* Get pointers to the register contents */
     In  = &E->RI->In;
     Out = &E->RI->Out;
+    BranchOut = &E->RI->Out2;
 
     /* Handle the different instructions */
     switch (E->OPC) {
 
         case OP65_ADC:
-            /* We don't know the value of the carry, so the result is
-            ** always unknown.
-            */
             Out->RegA = UNKNOWN_REGVAL;
+            Out->PFlags |= UNKNOWN_PFVAL_CZVN;
+            Out->ZNRegs = ZNREG_A;
+            if (PStatesAreKnown (In->PFlags, PSTATE_C) &&
+                RegValIsKnown (In->RegA)) {
+                if (CE_IsConstImm (E)) {
+                    Out->RegA = KnownOpADCDeduceCZVN (Out, In, (short) E->Num);
+                } else if (E->AM == AM65_ZP) {
+                    switch (GetKnownReg (E->Use & REG_ZP, In)) {
+                        case REG_TMP1:
+                            Out->RegA = KnownOpADCDeduceCZVN (Out, In, In->Tmp1);
+                            break;
+                        case REG_PTR1_LO:
+                            Out->RegA = KnownOpADCDeduceCZVN (Out, In, In->Ptr1Lo);
+                            break;
+                        case REG_PTR1_HI:
+                            Out->RegA = KnownOpADCDeduceCZVN (Out, In, In->Ptr1Hi);
+                            break;
+                        case REG_SREG_LO:
+                            Out->RegA = KnownOpADCDeduceCZVN (Out, In, In->SRegLo);
+                            break;
+                        case REG_SREG_HI:
+                            Out->RegA = KnownOpADCDeduceCZVN (Out, In, In->SRegHi);
+                            break;
+                        default:
+                            break;
+                    }
+                }
+            }
             break;
 
         case OP65_AND:
+            Out->RegA = UNKNOWN_REGVAL;
+            Out->ZNRegs = ZNREG_A;
             if (RegValIsKnown (In->RegA)) {
                 if (CE_IsConstImm (E)) {
                     Out->RegA = In->RegA & (short) E->Num;
@@ -549,145 +952,315 @@ void CE_GenRegInfo (CodeEntry* E, RegContents* InputRegs)
                             Out->RegA = In->RegA & In->SRegHi;
                             break;
                         default:
-                            Out->RegA = UNKNOWN_REGVAL;
                             break;
                     }
-                } else {
-                    Out->RegA = UNKNOWN_REGVAL;
                 }
             } else if (CE_IsKnownImm (E, 0)) {
                 /* A and $00 does always give zero */
                 Out->RegA = 0;
             }
+            DeduceZN (Out, Out->RegA);
             break;
 
         case OP65_ASL:
-            if (E->AM == AM65_ACC && RegValIsKnown (In->RegA)) {
-                Out->RegA = (In->RegA << 1) & 0xFF;
+            Out->PFlags |= UNKNOWN_PFVAL_CZN;
+            Out->ZNRegs = ZNREG_NONE;
+            if (E->AM == AM65_ACC) {
+                Out->RegA = AnyOpASLDeduceCZN (Out, In->RegA);
+                Out->ZNRegs = ZNREG_A;
             } else if (E->AM == AM65_ZP) {
                 switch (GetKnownReg (E->Chg & REG_ZP, In)) {
                     case REG_TMP1:
-                        Out->Tmp1 = (In->Tmp1 << 1) & 0xFF;
+                        Out->Tmp1 = AnyOpASLDeduceCZN (Out, In->Tmp1);
+                        Out->ZNRegs = ZNREG_TMP1;
                         break;
                     case REG_PTR1_LO:
-                        Out->Ptr1Lo = (In->Ptr1Lo << 1) & 0xFF;
+                        Out->Ptr1Lo = AnyOpASLDeduceCZN (Out, In->Ptr1Lo);
+                        Out->ZNRegs = ZNREG_PTR1_LO;
                         break;
                     case REG_PTR1_HI:
-                        Out->Ptr1Hi = (In->Ptr1Hi << 1) & 0xFF;
+                        Out->Ptr1Hi = AnyOpASLDeduceCZN (Out, In->Ptr1Hi);
+                        Out->ZNRegs = ZNREG_PTR1_HI;
                         break;
                     case REG_SREG_LO:
-                        Out->SRegLo = (In->SRegLo << 1) & 0xFF;
+                        Out->SRegLo = AnyOpASLDeduceCZN (Out, In->SRegLo);
+                        Out->ZNRegs = ZNREG_SREG_LO;
                         break;
                     case REG_SREG_HI:
-                        Out->SRegHi = (In->SRegHi << 1) & 0xFF;
+                        Out->SRegHi = AnyOpASLDeduceCZN (Out, In->SRegHi);
+                        Out->ZNRegs = ZNREG_SREG_HI;
                         break;
                 }
-            } else if (E->AM == AM65_ZPX) {
+            } else if (MightAffectKnownZP (E, In)) {
                 /* Invalidates all ZP registers */
                 RC_InvalidateZP (Out);
             }
             break;
 
         case OP65_BCC:
+            BranchDeduceOnProcessorFlag (Out, BranchOut, PFVAL_C);
             break;
 
         case OP65_BCS:
+            BranchDeduceOnProcessorFlag (BranchOut, Out, PFVAL_C);
             break;
 
         case OP65_BEQ:
+            BranchDeduceOnProcessorFlag (BranchOut, Out, PFVAL_Z);
             break;
 
         case OP65_BIT:
+            Out->ZNRegs = ZNREG_NONE;
+            if (E->AM == AM65_ZP) {
+                switch (GetKnownReg (E->Chg & REG_ZP, In)) {
+                    case REG_TMP1:
+                        Val = In->Tmp1;
+                        break;
+                    case REG_PTR1_LO:
+                        Val = In->Ptr1Lo;
+                        break;
+                    case REG_PTR1_HI:
+                        Val = In->Ptr1Hi;
+                        break;
+                    case REG_SREG_LO:
+                        Val = In->SRegLo;
+                        break;
+                    case REG_SREG_HI:
+                        Val = In->SRegHi;
+                        break;
+                }
+            } else if (CE_IsConstImm (E)) {
+                /* 65C02 special */
+                Val = (short) E->Num;
+            }
+
+            /* BIT is unique with regards to the Z/V/N flags:
+            ** - The Z is set/cleared according to whether the AND result is zero.
+            ** - The V is coped directly from Bit 6 of the orginal argument.
+            ** - The N is coped directly from Bit 7 of the orginal argument.
+            ** Note the V/N flags are not affected in imm addressing mode supported by 65c02!
+            */
+            if (E->AM == AM65_IMM) {
+                if (RegValIsKnown (Val)) {
+                    Out->PFlags &= ~(UNKNOWN_PFVAL_V | UNKNOWN_PFVAL_N);
+                    if (Val & PFVAL_V) {
+                        Out->PFlags |= PFVAL_V;
+                    }
+                    Out->PFlags &= ~UNKNOWN_PFVAL_V;
+                    if (Val & PFVAL_V) {
+                        Out->PFlags |= PFVAL_V;
+                    }
+                } else {
+                    Out->PFlags |= UNKNOWN_PFVAL_V | UNKNOWN_PFVAL_N;
+                }
+            }
+            if ((RegValIsKnown (Val) && RegValIsKnown (In->RegA))) {
+                Val &= In->RegA;
+            } else if (((RegValIsKnown (Val) && Val == 0) ||
+                        (RegValIsKnown (In->RegA) && In->RegA == 0))) {
+                Val = 0;
+            }
+            DeduceZ (Out, Val);
             break;
 
         case OP65_BMI:
+            BranchDeduceOnProcessorFlag (BranchOut, Out, PFVAL_N);
             break;
 
         case OP65_BNE:
+            BranchDeduceOnProcessorFlag (Out, BranchOut, PFVAL_Z);
             break;
 
         case OP65_BPL:
+            BranchDeduceOnProcessorFlag (Out, BranchOut, PFVAL_N);
             break;
 
         case OP65_BRA:
             break;
 
         case OP65_BRK:
+            Out->PFlags &= ~UNKNOWN_PFVAL_B;
+            Out->PFlags |= PFVAL_B;
             break;
 
         case OP65_BVC:
+            BranchDeduceOnProcessorFlag (Out, BranchOut, PFVAL_V);
             break;
 
         case OP65_BVS:
+            BranchDeduceOnProcessorFlag (BranchOut, Out, PFVAL_V);
             break;
 
         case OP65_CLC:
+            Out->PFlags &= ~UNKNOWN_PFVAL_C;
             break;
 
         case OP65_CLD:
+            Out->PFlags &= ~UNKNOWN_PFVAL_D;
             break;
 
         case OP65_CLI:
+            Out->PFlags &= ~UNKNOWN_PFVAL_I;
             break;
 
         case OP65_CLV:
+            Out->PFlags &= ~UNKNOWN_PFVAL_V;
             break;
 
         case OP65_CMP:
+            Out->PFlags |= UNKNOWN_PFVAL_CZN;
+            Out->ZNRegs = ZNREG_NONE;
+            if (RegValIsKnown (In->RegA)) {
+                if (CE_IsConstImm (E)) {
+                    KnownOpCmpDeduceCZN (Out, In->RegA, (short)E->Num);
+                } else if (E->AM == AM65_ZP) {
+                    switch (GetKnownReg (E->Use & REG_ZP, In)) {
+                        case REG_TMP1:
+                            KnownOpCmpDeduceCZN (Out, In->RegA, In->Tmp1);
+                            break;
+                        case REG_PTR1_LO:
+                            KnownOpCmpDeduceCZN (Out, In->RegA, In->Ptr1Lo);
+                            break;
+                        case REG_PTR1_HI:
+                            KnownOpCmpDeduceCZN (Out, In->RegA, In->Ptr1Hi);
+                            break;
+                        case REG_SREG_LO:
+                            KnownOpCmpDeduceCZN (Out, In->RegA, In->SRegLo);
+                            break;
+                        case REG_SREG_HI:
+                            KnownOpCmpDeduceCZN (Out, In->RegA, In->SRegHi);
+                            break;
+                        default:
+                            break;
+                    }
+                }
+            }
             break;
 
         case OP65_CPX:
+            Out->PFlags |= UNKNOWN_PFVAL_CZN;
+            Out->ZNRegs = ZNREG_NONE;
+            if (RegValIsKnown (In->RegX)) {
+                if (CE_IsConstImm (E)) {
+                    KnownOpCmpDeduceCZN (Out, In->RegX, (short)E->Num);
+                } else if (E->AM == AM65_ZP) {
+                    switch (GetKnownReg (E->Use & REG_ZP, In)) {
+                        case REG_TMP1:
+                            KnownOpCmpDeduceCZN (Out, In->RegX, In->Tmp1);
+                            break;
+                        case REG_PTR1_LO:
+                            KnownOpCmpDeduceCZN (Out, In->RegX, In->Ptr1Lo);
+                            break;
+                        case REG_PTR1_HI:
+                            KnownOpCmpDeduceCZN (Out, In->RegX, In->Ptr1Hi);
+                            break;
+                        case REG_SREG_LO:
+                            KnownOpCmpDeduceCZN (Out, In->RegX, In->SRegLo);
+                            break;
+                        case REG_SREG_HI:
+                            KnownOpCmpDeduceCZN (Out, In->RegX, In->SRegHi);
+                            break;
+                        default:
+                            break;
+                    }
+                }
+            }
             break;
 
         case OP65_CPY:
+            Out->PFlags |= UNKNOWN_PFVAL_CZN;
+            Out->ZNRegs = ZNREG_NONE;
+            if (RegValIsKnown (In->RegY)) {
+                if (CE_IsConstImm (E)) {
+                    KnownOpCmpDeduceCZN (Out, In->RegY, (short)E->Num);
+                } else if (E->AM == AM65_ZP) {
+                    switch (GetKnownReg (E->Use & REG_ZP, In)) {
+                        case REG_TMP1:
+                            KnownOpCmpDeduceCZN (Out, In->RegY, In->Tmp1);
+                            break;
+                        case REG_PTR1_LO:
+                            KnownOpCmpDeduceCZN (Out, In->RegY, In->Ptr1Lo);
+                            break;
+                        case REG_PTR1_HI:
+                            KnownOpCmpDeduceCZN (Out, In->RegY, In->Ptr1Hi);
+                            break;
+                        case REG_SREG_LO:
+                            KnownOpCmpDeduceCZN (Out, In->RegY, In->SRegLo);
+                            break;
+                        case REG_SREG_HI:
+                            KnownOpCmpDeduceCZN (Out, In->RegY, In->SRegHi);
+                            break;
+                        default:
+                            break;
+                    }
+                }
+            }
             break;
 
         case OP65_DEA:
+            Out->ZNRegs = ZNREG_A;
             if (RegValIsKnown (In->RegA)) {
                 Out->RegA = (In->RegA - 1) & 0xFF;
             }
+            DeduceZN (Out, Out->RegA);
             break;
 
         case OP65_DEC:
-            if (E->AM == AM65_ACC && RegValIsKnown (In->RegA)) {
-                Out->RegA = (In->RegA - 1) & 0xFF;
+            Out->ZNRegs = ZNREG_NONE;
+            if (E->AM == AM65_ACC) {
+                if (RegValIsKnown (In->RegA)) {
+                    Val = Out->RegA = (In->RegA - 1) & 0xFF;
+                }
+                Out->ZNRegs = ZNREG_A;
             } else if (E->AM == AM65_ZP) {
                 switch (GetKnownReg (E->Chg & REG_ZP, In)) {
                     case REG_TMP1:
-                        Out->Tmp1 = (In->Tmp1 - 1) & 0xFF;
+                        Val = Out->Tmp1 = (In->Tmp1 - 1) & 0xFF;
+                        Out->ZNRegs = ZNREG_TMP1;
                         break;
                     case REG_PTR1_LO:
-                        Out->Ptr1Lo = (In->Ptr1Lo - 1) & 0xFF;
+                        Val = Out->Ptr1Lo = (In->Ptr1Lo - 1) & 0xFF;
+                        Out->ZNRegs = ZNREG_PTR1_LO;
                         break;
                     case REG_PTR1_HI:
-                        Out->Ptr1Hi = (In->Ptr1Hi - 1) & 0xFF;
+                        Val = Out->Ptr1Hi = (In->Ptr1Hi - 1) & 0xFF;
+                        Out->ZNRegs = ZNREG_PTR1_HI;
                         break;
                     case REG_SREG_LO:
-                        Out->SRegLo = (In->SRegLo - 1) & 0xFF;
+                        Val = Out->SRegLo = (In->SRegLo - 1) & 0xFF;
+                        Out->ZNRegs = ZNREG_SREG_LO;
                         break;
                     case REG_SREG_HI:
-                        Out->SRegHi = (In->SRegHi - 1) & 0xFF;
+                        Val = Out->SRegHi = (In->SRegHi - 1) & 0xFF;
+                        Out->ZNRegs = ZNREG_SREG_HI;
                         break;
                 }
-            } else if (E->AM == AM65_ZPX) {
+            } else if (MightAffectKnownZP (E, In)) {
                 /* Invalidates all ZP registers */
                 RC_InvalidateZP (Out);
             }
+            DeduceZN (Out, Val);
             break;
 
         case OP65_DEX:
+            Out->ZNRegs = ZNREG_X;
             if (RegValIsKnown (In->RegX)) {
                 Out->RegX = (In->RegX - 1) & 0xFF;
             }
+            DeduceZN (Out, Out->RegX);
             break;
 
         case OP65_DEY:
+            Out->ZNRegs = ZNREG_Y;
             if (RegValIsKnown (In->RegY)) {
                 Out->RegY = (In->RegY - 1) & 0xFF;
             }
+            DeduceZN (Out, Out->RegY);
             break;
 
         case OP65_EOR:
+            Out->RegA = UNKNOWN_REGVAL;
+            Out->ZNRegs = ZNREG_A;
             if (RegValIsKnown (In->RegA)) {
                 if (CE_IsConstImm (E)) {
                     Out->RegA = In->RegA ^ (short) E->Num;
@@ -709,82 +1282,104 @@ void CE_GenRegInfo (CodeEntry* E, RegContents* InputRegs)
                             Out->RegA = In->RegA ^ In->SRegHi;
                             break;
                         default:
-                            Out->RegA = UNKNOWN_REGVAL;
                             break;
                     }
-                } else {
-                    Out->RegA = UNKNOWN_REGVAL;
                 }
             }
+            DeduceZN (Out, Out->RegA);
             break;
 
         case OP65_INA:
+            Out->ZNRegs = ZNREG_A;
             if (RegValIsKnown (In->RegA)) {
                 Out->RegA = (In->RegA + 1) & 0xFF;
             }
+            DeduceZN (Out, Out->RegA);
             break;
 
         case OP65_INC:
-            if (E->AM == AM65_ACC && RegValIsKnown (In->RegA)) {
-                Out->RegA = (In->RegA + 1) & 0xFF;
+            Out->ZNRegs = ZNREG_NONE;
+            if (E->AM == AM65_ACC) {
+                if (RegValIsKnown (In->RegA)) {
+                    Val = Out->RegA = (In->RegA + 1) & 0xFF;
+                }
+                Out->ZNRegs = ZNREG_A;
             } else if (E->AM == AM65_ZP) {
-                switch (GetKnownReg (E->Chg & REG_ZP, In)) {
+                switch (GetKnownReg (E->Chg & REG_ZP, 0)) {
                     case REG_TMP1:
-                        Out->Tmp1 = (In->Tmp1 + 1) & 0xFF;
+                        Val = Out->Tmp1 = (In->Tmp1 + 1) & 0xFF;
+                        Out->ZNRegs = ZNREG_TMP1;
                         break;
                     case REG_PTR1_LO:
-                        Out->Ptr1Lo = (In->Ptr1Lo + 1) & 0xFF;
+                        Val = Out->Ptr1Lo = (In->Ptr1Lo + 1) & 0xFF;
+                        Out->ZNRegs = ZNREG_PTR1_LO;
                         break;
                     case REG_PTR1_HI:
-                        Out->Ptr1Hi = (In->Ptr1Hi + 1) & 0xFF;
+                        Val = Out->Ptr1Hi = (In->Ptr1Hi + 1) & 0xFF;
+                        Out->ZNRegs = ZNREG_PTR1_HI;
                         break;
                     case REG_SREG_LO:
-                        Out->SRegLo = (In->SRegLo + 1) & 0xFF;
+                        Val = Out->SRegLo = (In->SRegLo + 1) & 0xFF;
+                        Out->ZNRegs = ZNREG_SREG_LO;
                         break;
                     case REG_SREG_HI:
-                        Out->SRegHi = (In->SRegHi + 1) & 0xFF;
+                        Val = Out->SRegHi = (In->SRegHi + 1) & 0xFF;
+                        Out->ZNRegs = ZNREG_SREG_HI;
                         break;
                 }
-            } else if (E->AM == AM65_ZPX) {
+            } else if (MightAffectKnownZP (E, In)) {
                 /* Invalidates all ZP registers */
                 RC_InvalidateZP (Out);
             }
+            DeduceZN (Out, Val);
             break;
 
         case OP65_INX:
+            Out->ZNRegs = ZNREG_X;
             if (RegValIsKnown (In->RegX)) {
                 Out->RegX = (In->RegX + 1) & 0xFF;
             }
+            DeduceZN (Out, Out->RegX);
             break;
 
         case OP65_INY:
+            Out->ZNRegs = ZNREG_Y;
             if (RegValIsKnown (In->RegY)) {
                 Out->RegY = (In->RegY + 1) & 0xFF;
             }
+            DeduceZN (Out, Out->RegY);
             break;
 
         case OP65_JCC:
+            BranchDeduceOnProcessorFlag (Out, BranchOut, PFVAL_C);
             break;
 
         case OP65_JCS:
+            BranchDeduceOnProcessorFlag (BranchOut, Out, PFVAL_C);
             break;
 
         case OP65_JEQ:
+            BranchDeduceOnProcessorFlag (BranchOut, Out, PFVAL_Z);
             break;
 
         case OP65_JMI:
+            BranchDeduceOnProcessorFlag (BranchOut, Out, PFVAL_N);
             break;
 
         case OP65_JMP:
             break;
 
         case OP65_JNE:
+            BranchDeduceOnProcessorFlag (Out, BranchOut, PFVAL_Z);
             break;
 
         case OP65_JPL:
+            BranchDeduceOnProcessorFlag (Out, BranchOut, PFVAL_N);
             break;
 
         case OP65_JSR:
+            Out->ZNRegs = ZNREG_NONE;
+
             /* Get the code info for the function */
             GetFuncInfo (E->Arg, &Use, &Chg);
             if (Chg & REG_A) {
@@ -811,6 +1406,9 @@ void CE_GenRegInfo (CodeEntry* E, RegContents* InputRegs)
             if (Chg & REG_SREG_HI) {
                 Out->SRegHi = UNKNOWN_REGVAL;
             }
+            /* FIXME: Quick hack to set flags on process status: */
+            Out->PFlags |= ((Chg & PSTATE_ALL) >> PSTATE_BITS_SHIFT) * 0x0101U;
+
             /* ## FIXME: Quick hack for some known functions: */
             if (strcmp (E->Arg, "complax") == 0) {
                 if (RegValIsKnown (In->RegA)) {
@@ -820,10 +1418,10 @@ void CE_GenRegInfo (CodeEntry* E, RegContents* InputRegs)
                     Out->RegX = (In->RegX ^ 0xFF);
                 }
             } else if (strcmp (E->Arg, "tosandax") == 0) {
-                if (In->RegA == 0) {
+                if (RegValIsKnown (In->RegA) && In->RegA == 0) {
                     Out->RegA = 0;
                 }
-                if (In->RegX == 0) {
+                if (RegValIsKnown (In->RegX) && In->RegX == 0) {
                     Out->RegX = 0;
                 }
             } else if (strcmp (E->Arg, "tosaslax") == 0) {
@@ -832,17 +1430,23 @@ void CE_GenRegInfo (CodeEntry* E, RegContents* InputRegs)
                     Out->RegA = 0;
                 }
             } else if (strcmp (E->Arg, "tosorax") == 0) {
-                if (In->RegA == 0xFF) {
+                if (RegValIsKnown (In->RegA) && In->RegA == 0xFF) {
                     Out->RegA = 0xFF;
                 }
-                if (In->RegX == 0xFF) {
+                if (RegValIsKnown (In->RegX) && In->RegX == 0xFF) {
                     Out->RegX = 0xFF;
                 }
             } else if (strcmp (E->Arg, "tosshlax") == 0) {
-                if ((In->RegA & 0x0F) >= 8) {
+                if (RegValIsKnown (In->RegA) && (In->RegA & 0x0F) >= 8) {
                     Out->RegA = 0;
                 }
-            } else if (FindBoolCmpCond (E->Arg) != CMP_INV ||
+            } else if (strcmp (E->Arg, "tosshrax") == 0) {
+                if (RegValIsKnown (In->RegA) && (In->RegA & 0x0F) >= 8) {
+                    Out->RegX = 0;
+                }
+            } else if (strcmp (E->Arg, "bcastax") == 0     ||
+                       strcmp (E->Arg, "bnegax") == 0      ||
+                       FindBoolCmpCond (E->Arg) != CMP_INV ||
                        FindTosCmpCond (E->Arg) != CMP_INV) {
                 /* Result is boolean value, so X is zero on output */
                 Out->RegX = 0;
@@ -850,12 +1454,16 @@ void CE_GenRegInfo (CodeEntry* E, RegContents* InputRegs)
             break;
 
         case OP65_JVC:
+            BranchDeduceOnProcessorFlag (Out, BranchOut, PFVAL_V);
             break;
 
         case OP65_JVS:
+            BranchDeduceOnProcessorFlag (BranchOut, Out, PFVAL_V);
             break;
 
         case OP65_LDA:
+            Out->RegA = UNKNOWN_REGVAL;
+            Out->ZNRegs = ZNREG_A;
             if (CE_IsConstImm (E)) {
                 Out->RegA = (unsigned char) E->Num;
             } else if (E->AM == AM65_ZP) {
@@ -876,16 +1484,15 @@ void CE_GenRegInfo (CodeEntry* E, RegContents* InputRegs)
                         Out->RegA = In->SRegHi;
                         break;
                     default:
-                        Out->RegA = UNKNOWN_REGVAL;
                         break;
                 }
-            } else {
-                /* A is now unknown */
-                Out->RegA = UNKNOWN_REGVAL;
             }
+            DeduceZN (Out, Out->RegA);
             break;
 
         case OP65_LDX:
+            Out->RegX = UNKNOWN_REGVAL;
+            Out->ZNRegs = ZNREG_X;
             if (CE_IsConstImm (E)) {
                 Out->RegX = (unsigned char) E->Num;
             } else if (E->AM == AM65_ZP) {
@@ -906,16 +1513,15 @@ void CE_GenRegInfo (CodeEntry* E, RegContents* InputRegs)
                         Out->RegX = In->SRegHi;
                         break;
                     default:
-                        Out->RegX = UNKNOWN_REGVAL;
                         break;
                 }
-            } else {
-                /* X is now unknown */
-                Out->RegX = UNKNOWN_REGVAL;
             }
+            DeduceZN (Out, Out->RegX);
             break;
 
         case OP65_LDY:
+            Out->RegY = UNKNOWN_REGVAL;
+            Out->ZNRegs = ZNREG_Y;
             if (CE_IsConstImm (E)) {
                 Out->RegY = (unsigned char) E->Num;
             } else if (E->AM == AM65_ZP) {
@@ -936,37 +1542,42 @@ void CE_GenRegInfo (CodeEntry* E, RegContents* InputRegs)
                         Out->RegY = In->SRegHi;
                         break;
                     default:
-                        Out->RegY = UNKNOWN_REGVAL;
                         break;
                 }
-            } else {
-                /* Y is now unknown */
-                Out->RegY = UNKNOWN_REGVAL;
             }
+            DeduceZN (Out, Out->RegY);
             break;
 
         case OP65_LSR:
-            if (E->AM == AM65_ACC && RegValIsKnown (In->RegA)) {
-                Out->RegA = (In->RegA >> 1) & 0xFF;
+            Out->PFlags |= UNKNOWN_PFVAL_CZN;
+            Out->ZNRegs = ZNREG_NONE;
+            if (E->AM == AM65_ACC) {
+                Out->RegA = AnyOpLSRDeduceCZN (Out, In->RegA);
+                Out->ZNRegs = ZNREG_A;
             } else if (E->AM == AM65_ZP) {
-                switch (GetKnownReg (E->Chg & REG_ZP, In)) {
+                switch (GetKnownReg (E->Chg & REG_ZP, 0)) {
                     case REG_TMP1:
-                        Out->Tmp1 = (In->Tmp1 >> 1) & 0xFF;
+                        Out->Tmp1 = AnyOpLSRDeduceCZN (Out, In->Tmp1);
+                        Out->ZNRegs = ZNREG_TMP1;
                         break;
                     case REG_PTR1_LO:
-                        Out->Ptr1Lo = (In->Ptr1Lo >> 1) & 0xFF;
+                        Out->Ptr1Lo = AnyOpLSRDeduceCZN (Out, In->Ptr1Lo);
+                        Out->ZNRegs = ZNREG_PTR1_LO;
                         break;
                     case REG_PTR1_HI:
-                        Out->Ptr1Hi = (In->Ptr1Hi >> 1) & 0xFF;
+                        Out->Ptr1Hi = AnyOpLSRDeduceCZN (Out, In->Ptr1Hi);
+                        Out->ZNRegs = ZNREG_PTR1_HI;
                         break;
                     case REG_SREG_LO:
-                        Out->SRegLo = (In->SRegLo >> 1) & 0xFF;
+                        Out->SRegLo = AnyOpLSRDeduceCZN (Out, In->SRegLo);
+                        Out->ZNRegs = ZNREG_SREG_LO;
                         break;
                     case REG_SREG_HI:
-                        Out->SRegHi = (In->SRegHi >> 1) & 0xFF;
+                        Out->SRegHi = AnyOpLSRDeduceCZN (Out, In->SRegHi);
+                        Out->ZNRegs = ZNREG_SREG_HI;
                         break;
                 }
-            } else if (E->AM == AM65_ZPX) {
+            } else if (MightAffectKnownZP (E, In)) {
                 /* Invalidates all ZP registers */
                 RC_InvalidateZP (Out);
             }
@@ -976,6 +1587,8 @@ void CE_GenRegInfo (CodeEntry* E, RegContents* InputRegs)
             break;
 
         case OP65_ORA:
+            Out->RegA = UNKNOWN_REGVAL;
+            Out->ZNRegs = ZNREG_A;
             if (RegValIsKnown (In->RegA)) {
                 if (CE_IsConstImm (E)) {
                     Out->RegA = In->RegA | (short) E->Num;
@@ -997,17 +1610,14 @@ void CE_GenRegInfo (CodeEntry* E, RegContents* InputRegs)
                             Out->RegA = In->RegA | In->SRegHi;
                             break;
                         default:
-                            Out->RegA = UNKNOWN_REGVAL;
                             break;
                     }
-                } else {
-                    /* A is now unknown */
-                    Out->RegA = UNKNOWN_REGVAL;
                 }
             } else if (CE_IsKnownImm (E, 0xFF)) {
                 /* ORA with 0xFF does always give 0xFF */
                 Out->RegA = 0xFF;
             }
+            DeduceZN (Out, Out->RegA);
             break;
 
         case OP65_PHA:
@@ -1024,93 +1634,150 @@ void CE_GenRegInfo (CodeEntry* E, RegContents* InputRegs)
 
         case OP65_PLA:
             Out->RegA = UNKNOWN_REGVAL;
+            Out->PFlags |= UNKNOWN_PFVAL_ZN;
+            Out->ZNRegs = ZNREG_A;
             break;
 
         case OP65_PLP:
+            Out->PFlags = UNKNOWN_PFVAL_ALL;
+            Out->ZNRegs = ZNREG_NONE;
             break;
 
         case OP65_PLX:
             Out->RegX = UNKNOWN_REGVAL;
+            Out->PFlags |= UNKNOWN_PFVAL_ZN;
+            Out->ZNRegs = ZNREG_X;
             break;
 
         case OP65_PLY:
             Out->RegY = UNKNOWN_REGVAL;
+            Out->PFlags |= UNKNOWN_PFVAL_ZN;
+            Out->ZNRegs = ZNREG_Y;
             break;
 
         case OP65_ROL:
-            /* We don't know the value of the carry bit */
+            Out->PFlags |= UNKNOWN_PFVAL_CZN;
+            Out->ZNRegs = ZNREG_NONE;
             if (E->AM == AM65_ACC) {
-                Out->RegA = UNKNOWN_REGVAL;
+                Out->RegA = AnyOpROLDeduceCZN (Out, In->PFlags, In->RegA);
+                Out->ZNRegs = ZNREG_A;
             } else if (E->AM == AM65_ZP) {
-                switch (GetKnownReg (E->Chg & REG_ZP, In)) {
+                switch (GetKnownReg (E->Chg & REG_ZP, 0)) {
                     case REG_TMP1:
-                        Out->Tmp1 = UNKNOWN_REGVAL;
+                        Out->Tmp1 = AnyOpROLDeduceCZN (Out, In->PFlags, In->Tmp1);
+                        Out->ZNRegs = ZNREG_TMP1;
                         break;
                     case REG_PTR1_LO:
-                        Out->Ptr1Lo = UNKNOWN_REGVAL;
+                        Out->Ptr1Lo = AnyOpROLDeduceCZN (Out, In->PFlags, In->Ptr1Lo);
+                        Out->ZNRegs = ZNREG_PTR1_LO;
                         break;
                     case REG_PTR1_HI:
-                        Out->Ptr1Hi = UNKNOWN_REGVAL;
+                        Out->Ptr1Hi = AnyOpROLDeduceCZN (Out, In->PFlags, In->Ptr1Hi);
+                        Out->ZNRegs = ZNREG_PTR1_HI;
                         break;
                     case REG_SREG_LO:
-                        Out->SRegLo = UNKNOWN_REGVAL;
+                        Out->SRegLo = AnyOpROLDeduceCZN (Out, In->PFlags, In->SRegLo);
+                        Out->ZNRegs = ZNREG_SREG_LO;
                         break;
                     case REG_SREG_HI:
-                        Out->SRegHi = UNKNOWN_REGVAL;
+                        Out->SRegHi = AnyOpROLDeduceCZN (Out, In->PFlags, In->SRegHi);
+                        Out->ZNRegs = ZNREG_SREG_HI;
                         break;
                 }
-            } else if (E->AM == AM65_ZPX) {
+            } else if (MightAffectKnownZP (E, In)) {
                 /* Invalidates all ZP registers */
                 RC_InvalidateZP (Out);
             }
             break;
 
         case OP65_ROR:
-            /* We don't know the value of the carry bit */
+            Out->PFlags |= UNKNOWN_PFVAL_CZN;
+            Out->ZNRegs = ZNREG_NONE;
             if (E->AM == AM65_ACC) {
-                Out->RegA = UNKNOWN_REGVAL;
+                Out->RegA = AnyOpRORDeduceCZN (Out, In->PFlags, In->RegA);
+                Out->ZNRegs = ZNREG_A;
             } else if (E->AM == AM65_ZP) {
-                switch (GetKnownReg (E->Chg & REG_ZP, In)) {
+                switch (GetKnownReg (E->Chg & REG_ZP, 0)) {
                     case REG_TMP1:
-                        Out->Tmp1 = UNKNOWN_REGVAL;
+                        Out->Tmp1 = AnyOpRORDeduceCZN (Out, In->PFlags, In->Tmp1);
+                        Out->ZNRegs = ZNREG_TMP1;
                         break;
                     case REG_PTR1_LO:
-                        Out->Ptr1Lo = UNKNOWN_REGVAL;
+                        Out->Ptr1Lo = AnyOpRORDeduceCZN (Out, In->PFlags, In->Ptr1Lo);
+                        Out->ZNRegs = ZNREG_PTR1_LO;
                         break;
                     case REG_PTR1_HI:
-                        Out->Ptr1Hi = UNKNOWN_REGVAL;
+                        Out->Ptr1Hi = AnyOpRORDeduceCZN (Out, In->PFlags, In->Ptr1Hi);
+                        Out->ZNRegs = ZNREG_PTR1_HI;
                         break;
                     case REG_SREG_LO:
-                        Out->SRegLo = UNKNOWN_REGVAL;
+                        Out->SRegLo = AnyOpRORDeduceCZN (Out, In->PFlags, In->SRegLo);
+                        Out->ZNRegs = ZNREG_SREG_LO;
                         break;
                     case REG_SREG_HI:
-                        Out->SRegHi = UNKNOWN_REGVAL;
+                        Out->SRegHi = AnyOpRORDeduceCZN (Out, In->PFlags, In->SRegHi);
+                        Out->ZNRegs = ZNREG_SREG_HI;
                         break;
                 }
-            } else if (E->AM == AM65_ZPX) {
+            } else if (MightAffectKnownZP (E, In)) {
                 /* Invalidates all ZP registers */
                 RC_InvalidateZP (Out);
             }
             break;
 
         case OP65_RTI:
+            Out->PFlags |= UNKNOWN_PFVAL_ALL;
             break;
 
         case OP65_RTS:
             break;
 
         case OP65_SBC:
-            /* We don't know the value of the carry bit */
             Out->RegA = UNKNOWN_REGVAL;
+            Out->PFlags |= UNKNOWN_PFVAL_CZVN;
+            Out->ZNRegs = ZNREG_A;
+            if (PStatesAreKnown (In->PFlags, PSTATE_C) &&
+                RegValIsKnown (In->RegA)) {
+                if (CE_IsConstImm (E)) {
+                    Out->RegA = KnownOpSBCDeduceCZVN (Out, In, (short) E->Num);
+                }
+                else if (E->AM == AM65_ZP) {
+                    switch (GetKnownReg(E->Use & REG_ZP, In)) {
+                    case REG_TMP1:
+                        Out->RegA = KnownOpSBCDeduceCZVN (Out, In, In->Tmp1);
+                        break;
+                    case REG_PTR1_LO:
+                        Out->RegA = KnownOpSBCDeduceCZVN (Out, In, In->Ptr1Lo);
+                        break;
+                    case REG_PTR1_HI:
+                        Out->RegA = KnownOpSBCDeduceCZVN (Out, In, In->Ptr1Hi);
+                        break;
+                    case REG_SREG_LO:
+                        Out->RegA = KnownOpSBCDeduceCZVN (Out, In, In->SRegLo);
+                        break;
+                    case REG_SREG_HI:
+                        Out->RegA = KnownOpSBCDeduceCZVN (Out, In, In->SRegHi);
+                        break;
+                    default:
+                        break;
+                    }
+                }
+            }
             break;
 
         case OP65_SEC:
+            Out->PFlags &= ~UNKNOWN_PFVAL_C;
+            Out->PFlags |= PFVAL_C;
             break;
 
         case OP65_SED:
+            Out->PFlags &= ~UNKNOWN_PFVAL_D;
+            Out->PFlags |= PFVAL_D;
             break;
 
         case OP65_SEI:
+            Out->PFlags &= ~UNKNOWN_PFVAL_I;
+            Out->PFlags |= PFVAL_I;
             break;
 
         case OP65_STA:
@@ -1132,10 +1799,13 @@ void CE_GenRegInfo (CodeEntry* E, RegContents* InputRegs)
                         Out->SRegHi = In->RegA;
                         break;
                 }
-            } else if (E->AM == AM65_ZPX) {
+            } else if (MightAffectKnownZP (E, In)) {
                 /* Invalidates all ZP registers */
                 RC_InvalidateZP (Out);
             }
+            break;
+
+        case OP65_STP:
             break;
 
         case OP65_STX:
@@ -1157,7 +1827,7 @@ void CE_GenRegInfo (CodeEntry* E, RegContents* InputRegs)
                         Out->SRegHi = In->RegX;
                         break;
                 }
-            } else if (E->AM == AM65_ZPX) {
+            } else if (MightAffectKnownZP (E, In)) {
                 /* Invalidates all ZP registers */
                 RC_InvalidateZP (Out);
             }
@@ -1182,7 +1852,7 @@ void CE_GenRegInfo (CodeEntry* E, RegContents* InputRegs)
                         Out->SRegHi = In->RegY;
                         break;
                 }
-            } else if (E->AM == AM65_ZPX) {
+            } else if (MightAffectKnownZP (E, In)) {
                 /* Invalidates all ZP registers */
                 RC_InvalidateZP (Out);
             }
@@ -1207,7 +1877,7 @@ void CE_GenRegInfo (CodeEntry* E, RegContents* InputRegs)
                         Out->SRegHi = 0;
                         break;
                 }
-            } else if (E->AM == AM65_ZPX) {
+            } else if (MightAffectKnownZP (E, In)) {
                 /* Invalidates all ZP registers */
                 RC_InvalidateZP (Out);
             }
@@ -1215,37 +1885,44 @@ void CE_GenRegInfo (CodeEntry* E, RegContents* InputRegs)
 
         case OP65_TAX:
             Out->RegX = In->RegA;
+            Out->ZNRegs = ZNREG_AX;
+            DeduceZN (Out, Out->RegX);
             break;
 
         case OP65_TAY:
             Out->RegY = In->RegA;
+            Out->ZNRegs = ZNREG_AY;
+            DeduceZN (Out, Out->RegY);
             break;
 
         case OP65_TRB:
-            if (E->AM == AM65_ZPX) {
-                /* Invalidates all ZP registers */
-                RC_InvalidateZP (Out);
-            } else if (E->AM == AM65_ZP) {
+            Out->ZNRegs = ZNREG_NONE;
+            if (E->AM == AM65_ZP) {
                 if (RegValIsKnown (In->RegA)) {
                     switch (GetKnownReg (E->Chg & REG_ZP, In)) {
                         case REG_TMP1:
+                            Val = Out->Tmp1 & In->RegA;
                             Out->Tmp1 &= ~In->RegA;
                             break;
                         case REG_PTR1_LO:
+                            Val = Out->Ptr1Lo & In->RegA;
                             Out->Ptr1Lo &= ~In->RegA;
                             break;
                         case REG_PTR1_HI:
+                            Val = Out->Ptr1Hi & In->RegA;
                             Out->Ptr1Hi &= ~In->RegA;
                             break;
                         case REG_SREG_LO:
+                            Val = Out->SRegLo & In->RegA;
                             Out->SRegLo &= ~In->RegA;
                             break;
                         case REG_SREG_HI:
+                            Val = Out->SRegHi & In->RegA;
                             Out->SRegHi &= ~In->RegA;
                             break;
                     }
                 } else {
-                    switch (GetKnownReg (E->Chg & REG_ZP, In)) {
+                    switch (GetKnownReg (E->Chg & REG_ZP, 0)) {
                         case REG_TMP1:
                             Out->Tmp1 = UNKNOWN_REGVAL;
                             break;
@@ -1263,34 +1940,41 @@ void CE_GenRegInfo (CodeEntry* E, RegContents* InputRegs)
                             break;
                     }
                 }
+            } else if (MightAffectKnownZP (E, In)) {
+                /* Invalidates all ZP registers */
+                RC_InvalidateZP (Out);
             }
+            DeduceZ (Out, Val);
             break;
 
         case OP65_TSB:
-            if (E->AM == AM65_ZPX) {
-                /* Invalidates all ZP registers */
-                RC_InvalidateZP (Out);
-            } else if (E->AM == AM65_ZP) {
+            Out->ZNRegs = ZNREG_NONE;
+            if (E->AM == AM65_ZP) {
                 if (RegValIsKnown (In->RegA)) {
                     switch (GetKnownReg (E->Chg & REG_ZP, In)) {
                         case REG_TMP1:
+                            Val = Out->Tmp1 & In->RegA;
                             Out->Tmp1 |= In->RegA;
                             break;
                         case REG_PTR1_LO:
+                            Val = Out->Ptr1Lo & In->RegA;
                             Out->Ptr1Lo |= In->RegA;
                             break;
                         case REG_PTR1_HI:
+                            Val = Out->Ptr1Hi & In->RegA;
                             Out->Ptr1Hi |= In->RegA;
                             break;
                         case REG_SREG_LO:
+                            Val = Out->SRegLo & In->RegA;
                             Out->SRegLo |= In->RegA;
                             break;
                         case REG_SREG_HI:
+                            Val = Out->SRegHi & In->RegA;
                             Out->SRegHi |= In->RegA;
                             break;
                     }
                 } else {
-                    switch (GetKnownReg (E->Chg & REG_ZP, In)) {
+                    switch (GetKnownReg (E->Chg & REG_ZP, 0)) {
                         case REG_TMP1:
                             Out->Tmp1 = UNKNOWN_REGVAL;
                             break;
@@ -1308,22 +1992,34 @@ void CE_GenRegInfo (CodeEntry* E, RegContents* InputRegs)
                             break;
                     }
                 }
+            } else if (MightAffectKnownZP (E, In)) {
+                /* Invalidates all ZP registers */
+                RC_InvalidateZP (Out);
             }
+            DeduceZ (Out, Val);
             break;
 
         case OP65_TSX:
             Out->RegX = UNKNOWN_REGVAL;
+            Out->PFlags |= UNKNOWN_PFVAL_ZN;
+            Out->ZNRegs = ZNREG_X;
             break;
 
         case OP65_TXA:
             Out->RegA = In->RegX;
+            Out->ZNRegs = ZNREG_AX;
+            DeduceZN (Out, Out->RegA);
             break;
 
         case OP65_TXS:
+            Out->ZNRegs = ZNREG_X;
+            DeduceZN (Out, In->RegX);
             break;
 
         case OP65_TYA:
             Out->RegA = In->RegY;
+            Out->ZNRegs = ZNREG_AY;
+            DeduceZN (Out, Out->RegA);
             break;
 
         default:
@@ -1349,6 +2045,7 @@ static char* RegInfoDesc (unsigned U, char* Buf)
     strcat (Buf, U & REG_PTR2?    "2" : "_");
     strcat (Buf, U & REG_SAVE?    "V"  : "_");
     strcat (Buf, U & REG_SP?      "S" : "_");
+    sprintf (Buf + 10, "_%02X", (U & PSTATE_ALL) >> PSTATE_BITS_SHIFT);
 
     return Buf;
 }
@@ -1373,11 +2070,59 @@ static char* RegContentDesc (const RegContents* RC, char* Buf)
     }
     B += 5;
     if (RegValIsUnknown (RC->RegY)) {
-        strcpy (B, "Y:XX");
+        strcpy (B, "Y:XX ");
     } else {
-        sprintf (B, "Y:%02X", RC->RegY);
+        sprintf (B, "Y:%02X ", RC->RegY);
     }
-    B += 4;
+    B += 5;
+    if (PStatesAreUnknown (RC->PFlags, PSTATE_C)) {
+        strcpy (B, "~");
+    } else {
+        strcpy (B, RC->PFlags & PFVAL_C ? "C" : "_");
+    }
+    B += 1;
+    if (PStatesAreUnknown (RC->PFlags, PSTATE_Z)) {
+        strcpy (B, "~");
+    } else {
+        strcpy (B, RC->PFlags & PFVAL_Z ? "Z" : "_");
+    }
+    B += 1;
+    if (PStatesAreUnknown (RC->PFlags, PSTATE_I)) {
+        strcpy (B, "~");
+    } else {
+        strcpy (B, RC->PFlags & PFVAL_I ? "I" : "_");
+    }
+    B += 1;
+    if (PStatesAreUnknown (RC->PFlags, PSTATE_D)) {
+        strcpy (B, "~");
+    } else {
+        strcpy (B, RC->PFlags & PFVAL_D ? "D" : "_");
+    }
+    B += 1;
+    if (PStatesAreUnknown (RC->PFlags, PSTATE_U)) {
+        strcpy (B, "~");
+    } else {
+        strcpy (B, RC->PFlags & PFVAL_U ? "U" : "_");
+    }
+    B += 1;
+    if (PStatesAreUnknown (RC->PFlags, PSTATE_B)) {
+        strcpy (B, "~");
+    } else {
+        strcpy (B, RC->PFlags & PFVAL_B ? "B" : "_");
+    }
+    B += 1;
+    if (PStatesAreUnknown (RC->PFlags, PSTATE_V)) {
+        strcpy (B, "~");
+    } else {
+        strcpy (B, RC->PFlags & PFVAL_V ? "V" : "_");
+    }
+    B += 1;
+    if (PStatesAreUnknown (RC->PFlags, PSTATE_N)) {
+        strcpy (B, "~");
+    } else {
+        strcpy (B, RC->PFlags & PFVAL_N ? "N" : "_");
+    }
+    B += 1;
 
     return Buf;
 }
@@ -1472,7 +2217,7 @@ void CE_Output (const CodeEntry* E)
     if (Debug) {
         char Use [128];
         char Chg [128];
-        WriteOutput ("%*s; USE: %-12s CHG: %-12s SIZE: %u",
+        WriteOutput ("%*s; USE: %-15s CHG: %-15s SIZE: %u",
                      (int)(30-Chars), "",
                      RegInfoDesc (E->Use, Use),
                      RegInfoDesc (E->Chg, Chg),
@@ -1481,7 +2226,7 @@ void CE_Output (const CodeEntry* E)
         if (E->RI) {
             char RegIn[32];
             char RegOut[32];
-            WriteOutput ("    In %s  Out %s",
+            WriteOutput ("   In %s   Out %s",
                          RegContentDesc (&E->RI->In, RegIn),
                          RegContentDesc (&E->RI->Out, RegOut));
         }

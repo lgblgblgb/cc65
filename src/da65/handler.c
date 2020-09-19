@@ -51,6 +51,8 @@
 
 
 
+static unsigned short SubroutineParamSize[0x10000];
+
 /*****************************************************************************/
 /*                             Helper functions                              */
 /*****************************************************************************/
@@ -344,7 +346,12 @@ void OH_Relative (const OpcDesc* D)
     GenerateLabel (D->Flags, Addr);
 
     /* Output the line */
-    OneLine (D, "%s", GetAddrArg (D->Flags, Addr));
+    if (HaveLabel(Addr)) {
+        OneLine (D, "%s", GetAddrArg (D->Flags, Addr));
+    } else {
+        /* No label -- make a relative address expression */
+        OneLine (D, "* + (%d)", (int) Offs + 2);
+    }
 }
 
 
@@ -740,4 +747,36 @@ void OH_JmpAbsoluteXIndirect (const OpcDesc* D)
         LineFeed ();
     }
     SeparatorLine ();
+}
+
+
+
+void OH_JsrAbsolute (const OpcDesc* D)
+{
+    unsigned ParamSize = SubroutineParamSize[GetCodeWord (PC+1)];
+    OH_Absolute (D);
+    if (ParamSize > 0) {
+        unsigned RemainingBytes;
+        unsigned BytesLeft;
+        PC += D->Size;
+        RemainingBytes = GetRemainingBytes ();
+        if (RemainingBytes < ParamSize) {
+            ParamSize = RemainingBytes;
+        }
+        BytesLeft = ParamSize;
+        while (BytesLeft > 0) {
+            unsigned Chunk = (BytesLeft > BytesPerLine) ? BytesPerLine : BytesLeft;
+            DataByteLine (Chunk);
+            BytesLeft -= Chunk;
+            PC        += Chunk;
+        }
+        PC -= D->Size;
+    }
+}
+
+
+
+void SetSubroutineParamSize (unsigned Addr, unsigned Size)
+{
+    SubroutineParamSize[Addr] = Size;
 }

@@ -1,4 +1,4 @@
-.PHONY: all mostlyclean clean install zip avail unavail bin lib doc samples
+.PHONY: all mostlyclean clean install zip avail unavail bin lib doc html info samples test
 
 .SUFFIXES:
 
@@ -14,11 +14,14 @@ avail unavail bin:
 lib:
 	@$(MAKE) -C libsrc  --no-print-directory $@
 
-doc:
+doc html info:
 	@$(MAKE) -C doc     --no-print-directory $@
 
 samples:
 	@$(MAKE) -C samples --no-print-directory $@
+
+test:
+	@$(MAKE) -C test    --no-print-directory $@
 
 %65:
 	@$(MAKE) -C src     --no-print-directory $@

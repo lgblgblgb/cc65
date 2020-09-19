@@ -151,7 +151,7 @@ static unsigned char OptionalAddrSize (void)
 static void SetBoolOption (unsigned char* Flag)
 /* Read a on/off/+/- option and set flag accordingly */
 {
-    static const char* Keys[] = {
+    static const char* const Keys[] = {
         "OFF",
         "ON",
     };
@@ -167,13 +167,13 @@ static void SetBoolOption (unsigned char* Flag)
         switch (GetSubKey (Keys, sizeof (Keys) / sizeof (Keys [0]))) {
             case 0:     *Flag = 0; NextTok ();                  break;
             case 1:     *Flag = 1; NextTok ();                  break;
-            default:    ErrorSkip ("`on' or `off' expected");   break;
+            default:    ErrorSkip ("'on' or 'off' expected");   break;
         }
     } else if (TokIsSep (CurTok.Tok)) {
         /* Without anything assume switch on */
         *Flag = 1;
     } else {
-        ErrorSkip ("`on' or `off' expected");
+        ErrorSkip ("'on' or 'off' expected");
     }
 }
 
@@ -451,7 +451,7 @@ static void DoASCIIZ (void)
 static void DoAssert (void)
 /* Add an assertion */
 {
-    static const char* ActionTab [] = {
+    static const char* const ActionTab [] = {
         "WARN", "WARNING",
         "ERROR",
         "LDWARN", "LDWARNING",
@@ -574,7 +574,7 @@ static void DoByte (void)
 
     /* Record type information */
     Span* S = OpenSpan ();
-    StrBuf Type = STATIC_STRBUF_INITIALIZER;
+    StrBuf Type = AUTO_STRBUF_INITIALIZER;
 
     /* Parse arguments */
     while (1) {
@@ -598,9 +598,14 @@ static void DoByte (void)
         }
     }
 
-    /* Close the span, then add type information to it */
+    /* Close the span, then add type information to it.
+    ** Note: empty string operands emit nothing;
+    ** so, add a type only if there's a span.
+    */
     S = CloseSpan (S);
-    SetSpanType (S, GenArrayType (&Type, GetSpanSize (S), EType, sizeof (EType)));
+    if (S != 0) {
+        SetSpanType (S, GenArrayType (&Type, GetSpanSize (S), EType, sizeof (EType)));
+    }
 
     /* Free the type string */
     SB_Done (&Type);
@@ -659,7 +664,7 @@ static void DoCode (void)
 static void DoConDes (void)
 /* Export a symbol as constructor/destructor */
 {
-    static const char* Keys[] = {
+    static const char* const Keys[] = {
         "CONSTRUCTOR",
         "DESTRUCTOR",
         "INTERRUPTOR",
@@ -744,7 +749,7 @@ static void DoData (void)
 static void DoDbg (void)
 /* Add debug information from high level code */
 {
-    static const char* Keys[] = {
+    static const char* const Keys[] = {
         "FILE",
         "FUNC",
         "LINE",
@@ -816,8 +821,17 @@ static void DoDebugInfo (void)
 
 
 static void DoDefine (void)
-/* Define a one line macro */
+/* Define a one-line macro */
 {
+    /* The function is called with the .DEFINE token in place, because we need
+    ** to disable .define macro expansions before reading the next token.
+    ** Otherwise, the name of the macro might be expanded; therefore,
+    ** we never would see it.
+    */
+    DisableDefineStyleMacros ();
+    NextTok ();
+    EnableDefineStyleMacros ();
+
     MacDef (MAC_STYLE_DEFINE);
 }
 
@@ -1012,7 +1026,7 @@ static void DoFeature (void)
         /* Set the feature and check for errors */
         if (SetFeature (&CurTok.SVal) == FEAT_UNKNOWN) {
             /* Not found */
-            ErrorSkip ("Invalid feature: `%m%p'", &CurTok.SVal);
+            ErrorSkip ("Invalid feature: '%m%p'", &CurTok.SVal);
             return;
         } else {
             /* Skip the keyword */
@@ -1039,7 +1053,7 @@ static void DoFileOpt (void)
     if (CurTok.Tok == TOK_IDENT) {
 
         /* Option given as keyword */
-        static const char* Keys [] = {
+        static const char* const Keys [] = {
             "AUTHOR", "COMMENT", "COMPILER"
         };
 
@@ -1237,7 +1251,7 @@ static void DoIncBin (void)
         char* PathName = SearchFile (BinSearchPath, SB_GetConstBuf (&Name));
         if (PathName == 0 || (F = fopen (PathName, "rb")) == 0) {
             /* Not found or cannot open, print an error and bail out */
-            ErrorSkip ("Cannot open include file `%m%p': %s", &Name, strerror (errno));
+            ErrorSkip ("Cannot open include file '%m%p': %s", &Name, strerror (errno));
             xfree (PathName);
             goto ExitPoint;
         }
@@ -1263,7 +1277,7 @@ static void DoIncBin (void)
     */
     SB_Terminate (&Name);
     if (FileStat (SB_GetConstBuf (&Name), &StatBuf) != 0) {
-        Fatal ("Cannot stat input file `%m%p': %s", &Name, strerror (errno));
+        Fatal ("Cannot stat input file '%m%p': %s", &Name, strerror (errno));
     }
 
     /* Add the file to the input file table */
@@ -1300,7 +1314,7 @@ static void DoIncBin (void)
         size_t BytesRead = fread (Buf, 1, BytesToRead, F);
         if (BytesToRead != BytesRead) {
             /* Some sort of error */
-            ErrorSkip ("Cannot read from include file `%m%p': %s",
+            ErrorSkip ("Cannot read from include file '%m%p': %s",
                        &Name, strerror (errno));
             break;
         }
@@ -1388,7 +1402,7 @@ static void DoList (void)
 /* Enable/disable the listing */
 {
     /* Get the setting */
-    unsigned char List;
+    unsigned char List = 0;
     SetBoolOption (&List);
 
     /* Manage the counter */
@@ -1866,12 +1880,12 @@ static void DoTag (void)
 
 
 static void DoUnDef (void)
-/* Undefine a define style macro */
+/* Undefine a define-style macro */
 {
     /* The function is called with the .UNDEF token in place, because we need
     ** to disable .define macro expansions before reading the next token.
-    ** Otherwise the name of the macro would be expanded, so we would never
-    ** see it.
+    ** Otherwise, the name of the macro would be expanded; therefore,
+    ** we never would see it.
     */
     DisableDefineStyleMacros ();
     NextTok ();
@@ -1891,7 +1905,7 @@ static void DoUnDef (void)
 static void DoUnexpected (void)
 /* Got an unexpected keyword */
 {
-    Error ("Unexpected `%m%p'", &Keyword);
+    Error ("Unexpected '%m%p'", &Keyword);
     SkipUntilSep ();
 }
 
@@ -1957,7 +1971,7 @@ static void DoZeropage (void)
 /* Control commands flags */
 enum {
     ccNone      = 0x0000,               /* No special flags */
-    ccKeepToken = 0x0001                /* Do not skip the current token */
+    ccKeepToken = 0x0001                /* Do not skip the control token */
 };
 
 /* Control command table */
@@ -1996,7 +2010,7 @@ static CtrlDesc CtrlCmdTab [] = {
     { ccNone,           DoDbg,          },
     { ccNone,           DoDByt          },
     { ccNone,           DoDebugInfo     },
-    { ccNone,           DoDefine        },
+    { ccKeepToken,      DoDefine        },
     { ccNone,           DoUnexpected    },      /* .DEFINED */
     { ccNone,           DoUnexpected    },      /* .DEFINEDMACRO */
     { ccNone,           DoDelMac        },

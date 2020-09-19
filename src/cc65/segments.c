@@ -143,12 +143,14 @@ static Segments* NewSegments (SymEntry* Func)
     Segments* S = xmalloc (sizeof (Segments));
 
     /* Initialize the fields */
-    S->Text     = NewTextSeg (Func);
-    S->Code     = NewCodeSeg (GetSegName (SEG_CODE), Func);
-    S->Data     = NewDataSeg (GetSegName (SEG_DATA), Func);
-    S->ROData   = NewDataSeg (GetSegName (SEG_RODATA), Func);
-    S->BSS      = NewDataSeg (GetSegName (SEG_BSS), Func);
-    S->CurDSeg  = SEG_DATA;
+    S->Text    = NewTextSeg (Func);
+    S->Code    = NewCodeSeg (GetSegName (SEG_CODE), Func);
+    S->Data    = NewDataSeg (GetSegName (SEG_DATA), Func);
+    S->ROData  = NewDataSeg (GetSegName (SEG_RODATA), Func);
+    S->BSS     = NewDataSeg (GetSegName (SEG_BSS), Func);
+    S->CurDSeg = SEG_DATA;
+    S->NextLabel     = 0;
+    S->NextDataLabel = 0;
 
     /* Return the new struct */
     return S;
@@ -289,13 +291,13 @@ void OutputSegments (const Segments* S)
     /* Output the text segment */
     TS_Output (S->Text);
 
+    /* Output the code segment */
+    CS_Output (S->Code);
+
     /* Output the three data segments */
     DS_Output (S->Data);
     DS_Output (S->ROData);
     DS_Output (S->BSS);
-
-    /* Output the code segment */
-    CS_Output (S->Code);
 
     /* Output the code segment epiloque */
     CS_OutputEpilogue (S->Code);

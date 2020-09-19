@@ -407,12 +407,12 @@ long GetExprVal (ExprNode* Expr)
                 Error ("Argument for .BANK is not segment relative or too complex");
             }
             if (D.Seg->MemArea == 0) {
-                Error ("Segment `%s' is referenced by .BANK but "
+                Error ("Segment '%s' is referenced by .BANK but "
                        "not assigned to a memory area",
                        GetString (D.Seg->Name));
             }
             if (D.Seg->MemArea->BankExpr == 0) {
-                Error ("Memory area `%s' is referenced by .BANK but "
+                Error ("Memory area '%s' is referenced by .BANK but "
                        "has no BANK attribute",
                        GetString (D.Seg->MemArea->Name));
             }
@@ -441,6 +441,10 @@ long GetExprVal (ExprNode* Expr)
 
         case EXPR_DWORD:
             return GetExprVal (Expr->Left) & 0xFFFFFFFF;
+
+        case EXPR_NEARADDR:
+            /* Assembler was expected to validate this truncation. */
+            return GetExprVal (Expr->Left) & 0xFFFF;
 
         default:
             Internal ("Unknown expression Op type: %u", Expr->Op);

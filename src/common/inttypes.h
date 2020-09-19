@@ -38,29 +38,39 @@
 
 
 
-/* If we have stdint.h, include it, otherwise try some quesswork on types.
+/* If we have <stdint.h>, include it; otherwise, adapt types from <stddef.h>
+** and define integer boundary constants.
 ** gcc and msvc don't define __STDC_VERSION__ without special flags, so check
-** for them explicitly. Undefined symbols are replaced by zero, so a check for
-** defined(__GNUC__) or defined(_MSC_VER) is not necessary.
+** for them explicitly.  Undefined symbols are replaced by zero; so, checks for
+** defined(__GNUC__) and defined(_MSC_VER) aren't necessary.
 */
 #if (__STDC_VERSION__ >= 199901) || (__GNUC__ >= 3) || (_MSC_VER >= 1600)
 #include <stdint.h>
 #else
 
-/* Assume long is the largest type available, and assume that pointers can be
-** safely converted into this type and back.
+/* Assume that ptrdiff_t and size_t are wide enough to hold pointers.
+** Assume that they are the widest type.
 */
-typedef long intptr_t;
-typedef unsigned long uintptr_t;
-typedef long intmax_t;
-typedef unsigned long uintmax_t;
+#include <stddef.h>
 
+typedef ptrdiff_t intptr_t;
+typedef size_t uintptr_t;
+typedef ptrdiff_t intmax_t;
+typedef size_t uintmax_t;
 
+#define INT8_MAX (0x7F)
+#define INT16_MAX (0x7FFF)
+#define INT32_MAX (0x7FFFFFFF)
+
+#define INT8_MIN (-INT8_MAX - 1)
+#define INT16_MIN (-INT16_MAX - 1)
+
+#define UINT8_MAX (0xFF)
+#define UINT16_MAX (0xFFFF)
 
 #endif
 
 
 
 /* End of inttypes.h */
-
 #endif

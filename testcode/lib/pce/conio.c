@@ -1,3 +1,4 @@
+#include <pce.h>
 #include <conio.h>
 #include <time.h>
 #include <joystick.h>
@@ -5,6 +6,10 @@
 #include <stdlib.h>
 
 static int datavar = 10;
+
+static char hex[16] = { "0123456789abcdef" };
+static char charbuf[0x20];
+static char colbuf[0x20];
 
 void main(void)
 {
@@ -20,11 +25,27 @@ void main(void)
         screensize(&xsize, &ysize);
 
         cputs("hello world");
+        gotoxy(0,0);
+        cpeeks(charbuf, 11);
+        gotoxy(12,0);
+        cputs(charbuf);
+
         cputsxy(0, 2, "colors:" );
         for (i = 0; i < 16; ++i) {
                 textcolor(i);
-                cputc('X');
+                cputc(hex[i]);
         }
+        for (i = 0; i < 16; ++i) {
+            gotoxy(7 + i, 2);
+            charbuf[i] = cpeekc();
+            colbuf[i] = cpeekcolor();
+        }
+        gotoxy(25, 2);
+        for (i = 0; i < 16; ++i) {
+            textcolor(colbuf[i]);
+            cputc(charbuf[i]);
+        }
+
         textcolor(1);
 
         gotoxy(0,4);
@@ -44,7 +65,7 @@ void main(void)
                         p[8],p[9],p[10],p[11],p[12],p[13],p[14],p[15]
                 );
         }
-        memcpy(p, main, 0);     /* test that a zero length doesn't copy 64K */
+        memcpy(p, main, i = 0);     /* test that a zero length doesn't copy 64K */
 
         gotoxy(0,ysize - 1);
         for (i = 0; i < xsize; ++i) {
@@ -97,14 +118,14 @@ void main(void)
                         j = joy_read (i);
                         cprintf ("pad %d: %02x %-6s%-6s%-6s%-6s%-6s%-6s%-6s%-6s",
                                 i, j,
-                                (j & joy_masks[JOY_UP])?    "  up  " : " ---- ",
-                                (j & joy_masks[JOY_DOWN])?  " down " : " ---- ",
-                                (j & joy_masks[JOY_LEFT])?  " left " : " ---- ",
-                                (j & joy_masks[JOY_RIGHT])? "right " : " ---- ",
-                                (j & joy_masks[JOY_FIRE])?  " fire " : " ---- ",
-                                (j & joy_masks[JOY_FIRE2])? "fire2 " : " ---- ",
-                                (j & joy_masks[JOY_SELECT])? "select" : " ---- ",
-                                (j & joy_masks[JOY_RUN])?   " run  " : " ---- ");
+                                JOY_UP(j)?     "  up  " : " ---- ",
+                                JOY_DOWN(j)?   " down " : " ---- ",
+                                JOY_LEFT(j)?   " left " : " ---- ",
+                                JOY_RIGHT(j)?  "right " : " ---- ",
+                                JOY_BTN_I(j)?  "btn I " : " ---- ",
+                                JOY_BTN_II(j)? "btn II" : " ---- ",
+                                JOY_SELECT(j)? "select" : " ---- ",
+                                JOY_RUN(j)?    " run  " : " ---- ");
                 }
 
                 gotoxy(xsize - 10, 3);
@@ -113,6 +134,17 @@ void main(void)
                 cputc(nn ? 'R' : ' ');
                 cputs(" revers");
                 revers(0);
+
+                for (i = 0; i < 9; ++i) {
+                    gotoxy(xsize - 10 + i, 3);
+                    charbuf[i] = cpeekc();
+                    colbuf[i] = cpeekrevers();
+                }
+                gotoxy(xsize - 10, 4);
+                for (i = 0; i < 9; ++i) {
+                    revers(colbuf[i]);
+                    cputc(charbuf[i]);
+                }
 
                 if ((n & 0x1f) == 0x00) {
                         nn = p[15];
@@ -123,7 +155,7 @@ void main(void)
                                 p[8],p[9],p[10],p[11],p[12],p[13],p[14],p[15]);
                 }
 
-                waitvblank();
+                waitvsync();
                 ++n;
         }
 }

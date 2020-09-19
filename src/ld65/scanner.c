@@ -196,7 +196,7 @@ static void StrVal (void)
 
                     default:
                         CfgWarning (&CfgErrorPos,
-                                    "Unkown escape sequence `%%%c'", C);
+                                    "Unkown escape sequence '%%%c'", C);
                         SB_AppendChar (&CfgSVal, '%');
                         SB_AppendChar (&CfgSVal, C);
                         NextChar ();
@@ -389,7 +389,7 @@ Again:
             break;
 
         default:
-            CfgError (&CfgErrorPos, "Invalid character `%c'", C);
+            CfgError (&CfgErrorPos, "Invalid character '%c'", C);
 
     }
 }
@@ -410,7 +410,7 @@ void CfgConsume (cfgtok_t T, const char* Msg)
 void CfgConsumeSemi (void)
 /* Consume a semicolon */
 {
-    CfgConsume (CFGTOK_SEMI, "`;' expected");
+    CfgConsume (CFGTOK_SEMI, "';' expected");
 }
 
 
@@ -418,7 +418,7 @@ void CfgConsumeSemi (void)
 void CfgConsumeColon (void)
 /* Consume a colon */
 {
-    CfgConsume (CFGTOK_COLON, "`:' expected");
+    CfgConsume (CFGTOK_COLON, "':' expected");
 }
 
 
@@ -490,7 +490,6 @@ void CfgSpecialToken (const IdentTok* Table, unsigned Size, const char* Name)
 
     /* We need an identifier */
     if (CfgTok == CFGTOK_IDENT) {
-
         /* Make it upper case */
         SB_ToUpper (&CfgSVal);
 
@@ -502,10 +501,13 @@ void CfgSpecialToken (const IdentTok* Table, unsigned Size, const char* Name)
             }
         }
 
+        /* Not found */
+        CfgError (&CfgErrorPos, "%s expected, got '%s'", Name, SB_GetConstBuf(&CfgSVal));
+        return;
     }
 
-    /* Not found or no identifier */
-    CfgError (&CfgErrorPos, "%s expected, got '%s'", Name, SB_GetConstBuf(&CfgSVal));
+    /* No identifier */
+    CfgError (&CfgErrorPos, "%s expected", Name);
 }
 
 
@@ -556,7 +558,7 @@ void CfgOpenInput (void)
     /* Open the file */
     InputFile = fopen (CfgName, "r");
     if (InputFile == 0) {
-        Error ("Cannot open `%s': %s", CfgName, strerror (errno));
+        Error ("Cannot open '%s': %s", CfgName, strerror (errno));
     }
 
     /* Initialize variables */
